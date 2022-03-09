@@ -5,6 +5,8 @@
 //#include <FEHRPS.h>
 #include <FEHServo.h>
 #include <FEHBattery.h>
+#include <math.h>
+#include <FEHRPS.h>
 
 /*
     Global Definitions
@@ -14,15 +16,19 @@
 
 */
 // Motor equilibrium percentages
-//WILL CHANGE TO 30 and -42 WHEN TRAY IS DUMPED! NVM
-float LEFTPERCENT = 32;
-float  RIGHTPERCENT = -42.0;
+
+float LEFTPERCENT = 39.;
+float  RIGHTPERCENT = -47.0;
 // parameters for line following functions. Will control how long the function is active for(aka time to button)
 #define Time_JUKEBOXRED 3
 #define Time_JUKEBOXBLUE 3
-#define Time_Tray 2.5
+#define Time_Tray 3.0
 
 #define LINETHRESHHOLD 1.5
+
+//left and right definitions for shaft encoder turning
+#define LEFT false
+#define RIGHT true
 /*
 Input pins/sensors/motors!!!!!!
 */
@@ -30,15 +36,302 @@ AnalogInputPin cdsSensor(FEHIO::P1_0);
 AnalogInputPin leftOpto(FEHIO::P0_2);
 AnalogInputPin midOpto(FEHIO::P0_1);
 AnalogInputPin rightOpto(FEHIO::P0_0);
+
+DigitalInputPin leftEncoder(FEHIO::P3_1);
+DigitalInputPin rightEncoder(FEHIO::P3_0);
+
+
 FEHMotor leftMotor(FEHMotor::Motor0, 7.2);
 FEHMotor rightMotor(FEHMotor::Motor3, 7.2);
 //Servo0 on right end(near tray servo), servo7 on left end
 FEHServo trayServo(FEHServo::Servo0);
 FEHServo ticketServo(FEHServo::Servo7);
 
+
 /*
     Classes and methods
 */
+
+/**
+ * @brief Motion class holds functions which have to do with shaft encoding and RPS. Initialize with objName(int counts on pinwheel)
+ * 
+ * As of 3/8/22 RPS isnt a thing on our robot yet, but it would be nice to have. 
+ */
+class Motion{
+    public:
+    int countsPerRev, leftCounts, rightCounts;
+    //Circumference of wheel = 3.14*D = 3.14*3.25
+    float distPerRev = 10.21;
+    /**
+     * @brief Construct a new Motion object
+     * 
+     * @param revCounts - number of counts per revolution(aka number of dark spots on pinwheel)
+     */
+    Motion(int revCounts){
+        countsPerRev=revCounts;
+        leftCounts=0;
+        rightCounts=0;
+    }
+    /**
+     * @brief writes the left and right digital optosensor values to the screen every 2s for a set amount of time
+     * 
+     * @param time 
+     *      -Time in seconds
+     */
+    void debugEncoderValues(int time){
+        double startTime = TimeNow();
+        while(TimeNow()-startTime<=time){
+            LCD.Clear();
+            LCD.WriteLine("LEFT ENCODER VALUE:");
+            LCD.WriteLine(leftEncoder.Value());
+            LCD.WriteLine("RIGHT ENCODER VALUE:");
+            LCD.WriteLine(rightEncoder.Value());
+            Sleep(2.0);
+        }
+    }
+    /**
+     * @brief implementation of driveForward using shaft encoding. 
+     *     will dynamically update left and right motor percentages for 
+     *      straight driving.
+     * 
+     * @param distance
+     *          - The desired distance
+     * @param dynamic
+     *          -TRUE to dynamically change motor speeds.
+     *          
+     */
+    void driveForward(float distance, bool dynamic){
+        int requiredCounts = (distance/distPerRev)*countsPerRev;
+        leftCounts=0;
+        rightCounts=0;
+        //Current values of left and right digital optosensors
+        int leftCurrent = leftEncoder.Value();
+        int rightCurrent = rightEncoder.Value();
+        //Counts per half second of right and left wheel.
+        int rightCPQS = 0,leftCPQS=0;
+        double intervalTime = TimeNow();
+        double startTime = TimeNow(),elapsedTime;
+        //Start her up
+        leftMotor.SetPercent(LEFTPERCENT);
+        rightMotor.SetPercent(RIGHTPERCENT);
+        //While average of left and right counts are less than counts for a desired distance, continue.
+        while(((leftCounts+rightCounts)/2)<requiredCounts){
+            //If left optosensor switches from a 0 to a 1 or vice versa, update left current value and add 1 to leftCounts
+            if(leftCurrent!=leftEncoder.Value()){
+                leftCurrent=leftEncoder.Value();
+                leftCounts++;
+                leftCPQS++;
+            }
+            if(rightCurrent!=rightEncoder.Value()){
+                rightCurrent=rightEncoder.Value();
+                rightCounts++;
+                rightCPQS++; 
+            }
+            //Check difference between right and left counts every half second, adjust motor percentages to compensate for difference
+            //To keep speeds bounded, will only increase and decrease the speed of one wheel. 
+            if(dynamic){
+            if(TimeNow()-intervalTime>=0.25){
+                /*
+                    If right wheel is moving faster than left wheel,
+                    increase speed of left wheel by the ratio of rightCounts/leftCounts.
+                    If left wheel is moving faster than right wheel, 
+                    decrease speed of left wheel by ratio leftCounts/rightCounts
+                    if speeds are relatively even, will change little, but if speeds are uneven, will change a lot.
+                */
+
+               //TODO: TESTING WITH THIS TO GET PERCENT CHANGES TO WORK WELL
+               //ALSO TODO: IMPLEMENT RPS TO ALIGN WITH DEST.
+               if(leftCPQS==0&&rightCPQS>0){
+                   //IF motor is running into a wall, thats bad! wow, i know. 
+                   //Fix this. 
+                        leftMotor.Stop();
+                        rightMotor.SetPercent(-RIGHTPERCENT/2.0);
+                        Sleep(0.5);
+                        leftMotor.SetPercent(LEFTPERCENT);
+                        rightMotor.SetPercent(RIGHTPERCENT);
+                        //CODE FOR REALIGNING TO DESTINATION WITH HERE.
+                    }else if(rightCPQS==0){
+                        rightMotor.Stop();
+                        leftMotor.SetPercent(-LEFTPERCENT/2.0);
+                        Sleep(0.5);
+                        leftMotor.SetPercent(LEFTPERCENT);
+                        rightMotor.SetPercent(RIGHTPERCENT);
+                        //CODE FOR REALIGNING TO DESTINATION WITH HERE.
+                        
+                    }
+                    else{
+                if(rightCPQS>leftCPQS){
+                    //no nooby divide by 0 errors.
+                    //Make Right Smaller, left larger 
+                    
+                    LEFTPERCENT+=(leftCPQS/(float)rightCPQS);
+                    //Right polarity reversed, so add to it to decrease it. 
+                    RIGHTPERCENT+=(leftCPQS/(float)rightCPQS);
+                    }
+                
+                else if(leftCPQS>rightCPQS){
+                    //Make right larger, left smaller
+                    
+                    //Ratio of current left percent to right percent times ratio of right counts to left counts
+                    //Leftpercent will generally decrease by less in this case, which is fine as that makes sense the way
+                    //our motors work. 
+                    LEFTPERCENT-=(rightCPQS/(float)leftCPQS);
+                    RIGHTPERCENT-=(rightCPQS/(float)leftCPQS);
+                }
+            }
+                //Change left percent to new value, set left and right counts per half sec to 0;
+                leftMotor.SetPercent(LEFTPERCENT);
+                rightMotor.SetPercent(RIGHTPERCENT);
+                rightCPQS=0;
+                leftCPQS=0;
+                intervalTime = TimeNow();
+            }
+            }
+        }
+        leftMotor.Stop();
+        rightMotor.Stop();
+        elapsedTime = TimeNow()-startTime;
+        LCD.Clear();
+
+        LCD.WriteLine("NEW LEFT PERCENT: ");
+        LCD.WriteLine(LEFTPERCENT);
+        LCD.WriteLine("RIGHT PERCENT:");
+        LCD.WriteLine(RIGHTPERCENT);
+        LCD.WriteLine("1)Distance driven 2) time(seconds)");
+        LCD.WriteLine(distance);
+        LCD.WriteLine(elapsedTime);
+    }
+    /**
+     * @brief Shaft encoding implementation of backwards driving. Does not include dynamic speed change capability right now
+     * 
+     * @param distance 
+     *          -The distance desired.
+     */
+    void driveBackwards(float distance){
+        int requiredCounts = (distance/distPerRev)*countsPerRev;
+        leftCounts=0;
+        rightCounts=0;
+        //Current values of left and right digital optosensors
+        int leftCurrent = leftEncoder.Value();
+        int rightCurrent = rightEncoder.Value();
+        //Start time
+        double startTime = TimeNow(),elapsedTime;
+        //Start her up
+        leftMotor.SetPercent(LEFTPERCENT);
+        rightMotor.SetPercent(RIGHTPERCENT);
+        //While average of left and right counts are less than counts for a desired distance, continue.
+        while(((leftCounts+rightCounts)/2)<requiredCounts){
+            //If left optosensor switches from a 0 to a 1 or vice versa, update left current value and add 1 to leftCounts
+            if(leftCurrent!=leftEncoder.Value()){
+                leftCurrent=leftEncoder.Value();
+                leftCounts++;
+            }
+            if(rightCurrent!=rightEncoder.Value()){
+                rightCurrent=rightEncoder.Value();
+                rightCounts++;
+                
+            } 
+        }
+        leftMotor.Stop();
+        rightMotor.Stop();
+        elapsedTime = TimeNow()-startTime;
+        LCD.Clear();
+
+        LCD.WriteLine("1)Distance driven 2) time(seconds)");
+        LCD.WriteLine(distance);
+        LCD.WriteLine(elapsedTime);
+    }
+    
+    /**
+     * @brief shaft encoding implementation of turn left.
+     * 
+     * @param angle
+     *      -The angle for which to turn (in degrees)
+     * @param direction
+     *      -Use global variable LEFT for left turn and RIGHT for right turn
+     */
+    void turn(float angle, bool direction){
+        /*
+        Wheelspan of robot is 
+        */
+       leftCounts=0;
+       rightCounts=0;
+       float turnRadius = 3.875;
+       float rads = (angle*3.1415)/180;
+       //dist = r*Theta
+       //revs = dist/circumference
+       float revsRequired = (turnRadius*rads)/distPerRev;
+       int requiredCounts = revsRequired*countsPerRev;
+       int leftCurrent = leftEncoder.Value();
+       int rightCurrent = rightEncoder.Value();
+       if(direction==LEFT){
+           leftMotor.SetPercent(-LEFTPERCENT);
+           rightMotor.SetPercent(RIGHTPERCENT);
+       }else{
+           leftMotor.SetPercent(LEFTPERCENT);
+           rightMotor.SetPercent(-RIGHTPERCENT);
+       }
+       //While average of counts is less than the required number of counts, keep going
+       //No differentail changes on turns. 
+       while(((leftCounts+rightCounts)/2)<requiredCounts){
+           if(leftCurrent!=leftEncoder.Value()){
+                leftCurrent=leftEncoder.Value();
+                leftCounts++;
+            }
+            if(rightCurrent!=rightEncoder.Value()){
+                rightCurrent=rightEncoder.Value();
+                rightCounts++;
+            }
+       }
+       leftMotor.Stop();
+       rightMotor.Stop();
+
+    }
+    void getRPSInfo(double time){
+        double timeStart = TimeNow();
+
+        while(TimeNow()-timeStart<=time){
+            LCD.WriteLine("X,Y,Heading");
+            LCD.WriteLine(RPS.X());
+            LCD.WriteLine(RPS.Y());
+            LCD.WriteLine(RPS.Heading());
+            Sleep(2.5);
+
+
+        }
+    }
+    /**
+     * @brief UNUSABLE UNTIL RPS FUNCTIONALITY IS ACHIEVED.
+     *        Align to any point on the course using math
+     * @param destX - X coordinates of destination
+     * @param destY - Y coordinates of destination
+     */
+    void alignTo(float destX, float destY){
+        //Find angle between current heading and desired point using the dot product identity
+        //<x,y> = ||x||*||y||*cos(interior angle)
+        float currentHeading = RPS.Heading();
+        currentHeading = currentHeading*(3.14/180.0);
+        //DO arcsin over the cross product if this doesn't work
+
+        float finX = destX-RPS.X();
+        float finY = destY-RPS.Y();
+        float cHeadingX = cos(currentHeading);
+        float cHeadingY = sin(currentHeading);
+        float dotprod = (cHeadingX*finX)+(cHeadingY*finY);
+        float normOfDestVector = sqrt((finX*finX)+(finY*finY));
+        //Look at line on top. Dont need norm of Heading vector because sin^2 + cos^2 is one. 
+        float angle = acos(dotprod/normOfDestVector);
+        angle = angle*(180.0/3.14);
+        //If heading X dest cross product is positive, left turn. If heading X dest cross product is negative, right turn
+        float cross = (cHeadingX*finY)-(cHeadingY*finX);
+        if(cross>=0){
+            turn(angle-90.,LEFT);
+        }else{
+            turn(angle+90.,RIGHT);
+        }
+
+    }  
+};
 /**
     @brief LineFollowing Class houses the functions used for line following
 
@@ -231,6 +524,7 @@ void driveBackwards(float distance)
     leftMotor.Stop();
     rightMotor.Stop();
 }
+
 /**
  * @brief Drives forward a set distance
  *
@@ -240,7 +534,7 @@ void driveBackwards(float distance)
 void driveForward(float distance)
 {
     // distance in inches
-    float velocity = 6.5;
+    float velocity = 6.0;
     // in in/s
     // velocity will be used to calculate
     float driveTime = distance / velocity;
@@ -261,7 +555,7 @@ void turnRight(float angle)
     // Angle in radians.
     // Robot turns from center of 2 wheels, so turning radius is 4.0in
     //2.25  revs in 10s
-    float turnVelocity = 2.0;
+    float turnVelocity = 1.7;
     // in rad/s
 
     float turningTime = angle / turnVelocity;
@@ -284,7 +578,7 @@ void turnLeft(float angle)
     // Robot turns from center of 2 wheels, so turning radius is 4.0in
     // S=r*angle, T=S/V
     //2.75 revs in 10s
-    float turnVelocity = 1.87;
+    float turnVelocity = 1.7;
     float turningTime = angle / turnVelocity;
     // Both percents positi7e: Right forward, left back.
 
@@ -367,10 +661,13 @@ int main(void)
     float x, y;
     LCD.WriteLine(Battery.Voltage());
     LineFollowing lineFollow;
+    Motion motion(20);
+    
     trayServo.SetMin(517);
     trayServo.SetMax(2500);
     ticketServo.SetMin(500);
-    ticketServo.SetMax(2200);
+    ticketServo.SetMax(2225);
+    
     /*
     /*
     debugForward();
@@ -434,9 +731,9 @@ int main(void)
     /*
         Exploration 3.
     */ 
-    
+    /*
     trayServo.SetDegree(135.0);
-    ticketServo.SetDegree(180.0);
+   
 
     while(!LCD.Touch(&x,&y)){}
     
@@ -444,21 +741,18 @@ int main(void)
     //Store and change left and right percent. 
     //Reset left and right percent after tray is dumped so rest of the program runs smoothly.
     
-    /*
+    
     float tempLeft = LEFTPERCENT;
     float tempRight = RIGHTPERCENT;
-    LEFTPERCENT = 35.0;
+    LEFTPERCENT = 30.0;
     RIGHTPERCENT = -43.0;
+    
 
-    
-    
-   
-    
     while (getLightColor() == 2){}
     
-        turnLeft(.5);
-        driveForward(20.0);
-        turnRight(0.685);
+        motion.turn(30.0,LEFT);
+        motion.driveForward(18.5);
+        motion.turn(65.0,RIGHT);
         lineFollow.follow(Time_Tray);
         Sleep(1.0);
         leftMotor.SetPercent(-20);
@@ -480,42 +774,53 @@ int main(void)
     
     driveBackwards(0.5);
     turnRight(3.2);
-    driveForward(9.0);
+    driveForward(7.0);
     turnLeft(1.55);
     
     Sleep(1.0);
     
-    driveForward(20.0);
-    LCD.WriteLine("SHOULD BE BY CENTER OF RAMP");
+    driveForward(25.0);
     Sleep(1.0);
     //Lower 0.8 Upper 1.20
-    turnLeft(0.8);
-    leftMotor.SetPercent(LEFTPERCENT+5);
-    rightMotor.SetPercent(RIGHTPERCENT);
-    Sleep(5.0);
-    leftMotor.Stop();
-    rightMotor.Stop();
-
-
-    Sleep(0.5);
-    turnLeft(0.8);
-    LCD.WriteLine("SHOULD BE IN POSITION TO GRAB TICKET");
-    Sleep(2.0);
-    ticketServo.SetDegree(120);
+    turnLeft(1.85);
+    Sleep(1.0);
+    driveForward(15.0);
+    turnLeft(1.57);
+    
+   
     LCD.WriteLine("SHOULD HAVE GRABBED TICKET");
     Sleep(0.5);
     driveBackwards(8.0);
-
     */
-   driveForward(15);
-   turnLeft(1.85);
-   Sleep(0.5);
-   driveForward(15);
-   turnLeft(1.45);
-    
-    
-    
+  // RPS.InitializeTouchMenu();
+   
+  
+   
+  
+   
 
+
+
+   ticketServo.SetDegree(180.);
+   Sleep(0.1);
+   ticketServo.SetDegree(90);
+    trayServo.SetDegree(135.0);
+    while(!LCD.Touch(&x,&y)){}
+    
+    while (getLightColor() == 2){}
+    motion.driveForward(14.5,true);
+    
+    Sleep(2.0);
+    motion.turn(30.0,RIGHT);
+
+    
+    
+    motion.driveForward(24.0,true);
+    
+    motion.turn(90.0,RIGHT);
+    motion.driveForward(4.0,true);
+    motion.turn(90.0,LEFT);
+    motion.driveForward(15.0,true);
     
 
     return 0;
