@@ -20,8 +20,8 @@
 */
 // Motor equilibrium percentages
 
-float LEFTPERCENT = 39.;
-float RIGHTPERCENT = -47.0;
+float LEFTPERCENT = 37.1;
+float RIGHTPERCENT = -49.0;
 
 // parameters for line following functions. Will control how long the function is active for(aka time to button)
 #define Time_JUKEBOXRED 3
@@ -111,6 +111,7 @@ public:
         int requiredCounts = (distance / distPerRev) * countsPerRev;
         leftCounts = 0;
         rightCounts = 0;
+        int stuckCounts = 0;
         // Current values of left and right digital optosensors
         int leftCurrent = leftEncoder.Value();
         int rightCurrent = rightEncoder.Value();
@@ -139,10 +140,9 @@ public:
             }
             // Check difference between right and left counts every half second, adjust motor percentages to compensate for difference
             // To keep speeds bounded, will only increase and decrease the speed of one wheel.
-            if (dynamic)
+            if (TimeNow() - intervalTime >= 0.25)
             {
-                if (TimeNow() - intervalTime >= 0.25)
-                {
+                
                     /*
                         If right wheel is moving faster than left wheel,
                         increase speed of left wheel by the ratio of rightCounts/leftCounts.
@@ -153,58 +153,54 @@ public:
 
                     // TODO: TESTING WITH THIS TO GET PERCENT CHANGES TO WORK WELL
                     // ALSO TODO: IMPLEMENT RPS TO ALIGN WITH DEST.
-                    if (leftCPQS == 0 && rightCPQS > 0)
-                    {
-                        // IF motor is running into a wall, thats bad! wow, i know.
-                        // Fix this.
-                        leftMotor.Stop();
-                        rightMotor.SetPercent(-RIGHTPERCENT / 2.0);
-                        Sleep(0.5);
-                        leftMotor.SetPercent(LEFTPERCENT);
-                        rightMotor.SetPercent(RIGHTPERCENT);
-                        // CODE FOR REALIGNING TO DESTINATION WITH HERE.
+                    if(leftCPQS==0&&rightCPQS==0){
+                        stuckCounts++;
                     }
-                    else if (rightCPQS == 0)
+                    if (rightCPQS == 0)
                     {
-                        rightMotor.Stop();
-                        leftMotor.SetPercent(-LEFTPERCENT / 2.0);
-                        Sleep(0.5);
-                        leftMotor.SetPercent(LEFTPERCENT);
-                        rightMotor.SetPercent(RIGHTPERCENT);
-                        // CODE FOR REALIGNING TO DESTINATION WITH HERE.
+                        rightCPQS = 1;
                     }
-                    else
+                    if (leftCPQS == 0)
                     {
-                        if (rightCPQS > leftCPQS)
-                        {
-                            // no nooby divide by 0 errors.
-                            // Make Right Smaller, left larger
-
-                            LEFTPERCENT += (leftCPQS / (float)rightCPQS);
-                            // Right polarity reversed, so add to it to decrease it.
-                            RIGHTPERCENT += (leftCPQS / (float)rightCPQS);
-                        }
-
-                        else if (leftCPQS > rightCPQS)
-                        {
-                            // Make right larger, left smaller
-
-                            // Ratio of current left percent to right percent times ratio of right counts to left counts
-                            // Leftpercent will generally decrease by less in this case, which is fine as that makes sense the way
-                            // our motors work.
-                            LEFTPERCENT -= (rightCPQS / (float)leftCPQS);
-                            RIGHTPERCENT -= (rightCPQS / (float)leftCPQS);
-                        }
+                        leftCPQS = 1;
                     }
-                    // Change left percent to new value, set left and right counts per half sec to 0;
-                    leftMotor.SetPercent(LEFTPERCENT);
-                    rightMotor.SetPercent(RIGHTPERCENT);
-                    rightCPQS = 0;
-                    leftCPQS = 0;
-                    intervalTime = TimeNow();
+                    
+                    if (dynamic){
+            
+                    if (rightCPQS > leftCPQS)
+                    {
+                        // no nooby divide by 0 errors.
+                        // Make Right Smaller, left larger
+
+                        LEFTPERCENT += (rightCPQS / (float)leftCPQS);
+                        // Right polarity reversed, so add to it to decrease it.
+                        RIGHTPERCENT += (rightCPQS / (float)leftCPQS);
+                    }
+
+                    else if (leftCPQS > rightCPQS)
+                    {
+                        // Make right larger, left smaller
+
+                        // Ratio of current left percent to right percent times ratio of right counts to left counts
+                        // Leftpercent will generally decrease by less in this case, which is fine as that makes sense the way
+                        // our motors work.
+                        LEFTPERCENT -= (leftCPQS / (float)rightCPQS);
+                        RIGHTPERCENT -= (leftCPQS / (float)rightCPQS);
+                    }
                 }
+                // Change left percent to new value, set left and right counts per half sec to 0;
+                leftMotor.SetPercent(LEFTPERCENT);
+                rightMotor.SetPercent(RIGHTPERCENT);
+                rightCPQS = 0;
+                leftCPQS = 0;
+                intervalTime = TimeNow();
             }
+            if(stuckCounts>4){
+                requiredCounts=0;
+            }
+
         }
+
         leftMotor.Stop();
         rightMotor.Stop();
         elapsedTime = TimeNow() - startTime;
@@ -319,12 +315,12 @@ public:
      * @brief Gets 5 RPS values on screen touch, writes them to screen and records them on a file.
      *
      */
-    void getRPSInfo()
+    void getRPSInfo(FEHFile *fptr)
     {
         float x = 0.0, y = 0.0;
         int count = 1;
         LCD.WriteLine("Logging 5 points to the SD card. After 10 points, getRPSInfo will exit.");
-        FEHFile *fehSD = SD.FOpen("RPSINFO.txt", "a");
+
         while (count <= 10)
         {
             while (!LCD.Touch(&x, &y))
@@ -334,10 +330,10 @@ public:
             {
             }
             LCD.Clear();
-            SD.FPrintf(fehSD, "Point %d\n", count);
-            SD.FPrintf(fehSD, "X: %f\n", RPS.X());
-            SD.FPrintf(fehSD, "Y: %f\n", RPS.Y());
-            SD.FPrintf(fehSD, "Heading: %f\n", RPS.Heading());
+            SD.FPrintf(fptr, "Point %d\n", count);
+            SD.FPrintf(fptr, "X: %f\n", RPS.X());
+            SD.FPrintf(fptr, "Y: %f\n", RPS.Y());
+            SD.FPrintf(fptr, "Heading: %f\n", RPS.Heading());
             LCD.WriteLine("Point ");
             LCD.Write(count);
             LCD.WriteLine("X, Y, Heading");
@@ -350,7 +346,6 @@ public:
             x = 0;
             y = 0;
         }
-        SD.FClose(fehSD);
     }
     /**
      * @brief The holy grail of functions if you will. Step aside steve jobs. Aligns to and drives to a point on the course.
@@ -358,11 +353,12 @@ public:
      * @param destX
      * @param destY
      */
-    void travelTo(float destX, float destY)
+    void travelTo(float destX, float destY, FEHFile *rpsTravelLog)
     {
-        FEHFile *rpsTravelLog = SD.FOpen("log.txt", "a+");
+
         float xi, yi, xf, yf, angleI, angleF, angleTurn, travelDist;
         bool atDest = false;
+        SD.FPrintf(rpsTravelLog, "\n");
         while (RPS.X() <= -1 || RPS.Y() <= -1)
         {
         }
@@ -378,7 +374,7 @@ public:
         xf = destX - xi;
         yf = destY - yi;
         // Think travel dist will work. x,y coords are supposed to be in inches.
-        travelDist = sqrt((xf * xf) + (yf * yf));
+        
         SD.FPrintf(rpsTravelLog, "Ran travelTo(%f,%f)\n", destX, destY);
         SD.FPrintf(rpsTravelLog, "I think I am at ( %f, %f ) facing %f deg\n", xi, yi, angleI);
         // Tree to find out which quadrant (xf,yf) is in. atan only returns values (-90,90)
@@ -465,6 +461,11 @@ public:
             }
             // we are now aligned with our destination.
             // drive there.
+            xi = RPS.X();
+            yi = RPS.Y();
+            xf = destX - xi;
+            yf = destY - yi;
+            travelDist = sqrt((xf * xf) + (yf * yf));
             driveForward(travelDist, true);
             Sleep(1.0);
             float newAngle = RPS.Heading() + 90.0;
@@ -473,7 +474,6 @@ public:
                 newAngle -= 360.0;
             }
             SD.FPrintf(rpsTravelLog, "I have arrived at (%f,%f) facing %f", RPS.X(), RPS.Y(), newAngle);
-            SD.FClose(rpsTravelLog);
         }
     }
 };
@@ -612,11 +612,20 @@ public:
         int state;
         double sTime, followingTime = time, guiLoopTime = TimeNow();
         sTime = TimeNow();
+        int lastState = 1;
 
         while (TimeNow() - sTime <= followingTime)
         {
 
             state = getSensorState();
+            if (state != 0)
+            {
+                lastState = state;
+            }
+            else if (state == 0)
+            {
+                state = lastState;
+            }
             // Display gui of which optosensors robot thinks are over the line.
             if (TimeNow() - guiLoopTime >= 0.5)
             {
@@ -807,6 +816,8 @@ int main(void)
     LCD.WriteLine(Battery.Voltage());
     LineFollowing lineFollow;
     Motion motion(20);
+    FEHFile *rpsCoordLog = SD.FOpen("coords.txt", "a+");
+    FEHFile *rpsTravelLog = SD.FOpen("rpsTrav.txt", "a+");
 
     trayServo.SetMin(517);
     trayServo.SetMax(2500);
@@ -814,192 +825,81 @@ int main(void)
     burgerServo.SetMax(2225);
 
     /*
-    /*
-    debugForward();
-    Sleep(10.0);
-    debugLeft();
-    Sleep(5.0);
-    debugRight();
-    *
-    // Wait to start
-    while (getLightColor() != 1)
-    {
-    }
-
-    /*
-        Go to the jukebox
-    **
-    // Orient and drive to jukebox. Get light color.
-    // TODO: Replace with orient to trash and dump tray
-    /*
-     turnLeft(.33);
-     driveForward(16.5);
-     Sleep(0.5);
-     int lightColor = getLightColor();
-    **
-
-     /*
-     Determine which light to press, drive towards correct light.
-
-
-     if(lightColor==1){
-         //Go to red light, return to starting position
-         turnLeft(1.25);
-         driveForward(4.935);
-         driveBackwards(4.935);
-         turnLeft(2.16);
-     }else{
-         //go to blue light
-     getLightColor();
-     getLightColor();
-     turnLeft(1.60);
-     driveForward(4.61);
-     driveBackwards(4.61);
-     turnLeft(1.8);
-
-
-     //Drive up the ramp
-
-     driveForward(4.25);
-     turnLeft(1.);
-     Sleep(0.1);
-     driveForward(30.0);
-     driveBackwards(30.);
-
-
-     rightMotor.Stop();
-     leftMotor.Stop();
-     */
-
-    /*
-        Exploration 3.
+    All commented out code is being moved to legacy.cpp.
     */
-    /*
-    trayServo.SetDegree(135.0);
 
-
-    while(!LCD.Touch(&x,&y)){}
-
-
-    //Store and change left and right percent.
-    //Reset left and right percent after tray is dumped so rest of the program runs smoothly.
-
-
-    float tempLeft = LEFTPERCENT;
-    float tempRight = RIGHTPERCENT;
-    LEFTPERCENT = 30.0;
-    RIGHTPERCENT = -43.0;
-
-
-    while (getLightColor() == 2){}
-
-        motion.turn(30.0,LEFT);
-        motion.driveForward(18.5);
-        motion.turn(65.0,RIGHT);
-        lineFollow.follow(Time_Tray);
-        Sleep(1.0);
-        leftMotor.SetPercent(-20);
-        Sleep(0.10);
-        leftMotor.Stop();
-        rightMotor.SetPercent(30);
-        Sleep(0.5);
-
-        leftMotor.Stop();
-        rightMotor.Stop();
-        trayServo.SetDegree(180.0);
-        Sleep(0.5);
-        trayServo.SetDegree(80.0);
-        LCD.Clear();
-        LCD.SetFontColor(BLACK);
-        LCD.WriteLine("SHOULD HAVE DUMPED TRAY");
-    LEFTPERCENT = tempLeft;
-    RIGHTPERCENT = tempRight;
-
-    driveBackwards(0.5);
-    turnRight(3.2);
-    driveForward(7.0);
-    turnLeft(1.55);
-
-    Sleep(1.0);
-
-    driveForward(25.0);
-    Sleep(1.0);
-    //Lower 0.8 Upper 1.20
-    turnLeft(1.85);
-    Sleep(1.0);
-    driveForward(15.0);
-    turnLeft(1.57);
-
-
-    LCD.WriteLine("SHOULD HAVE GRABBED TICKET");
-    Sleep(0.5);
-    driveBackwards(8.0);
-    */
-   
     burgerServo.SetDegree(100.0);
     trayServo.SetDegree(0.0);
-    Sleep(1.0);
+
     RPS.InitializeTouchMenu();
 
-    while (!LCD.Touch(&x, &y));
+    while (!LCD.Touch(&x, &y)){}
+        
     while (LCD.Touch(&x, &y))
     {
     }
+    
+    motion.driveForward(15.0,true);
+    float leftReset=LEFTPERCENT,rightReset=RIGHTPERCENT;
+    
+
     while (getLightColor() != 1)
     {
     }
-    //Ramp Base
-    motion.travelTo(18.0, 21.8);
-    //Top of ramp
-    motion.travelTo(18.2, 45.9);
-    motion.travelTo(32.5, 48.7);
+    // Ramp Base
+    motion.travelTo(18.0, 21.8, rpsTravelLog);
+    // Top of ramp
+    motion.travelTo(17., 48.9, rpsTravelLog);
+    motion.travelTo(32.5, 50.7, rpsTravelLog);
+    
+    LEFTPERCENT = leftReset;
+    RIGHTPERCENT = rightReset;
+    motion.travelTo(34.6,RPS.Y(),rpsTravelLog);
+    motion.travelTo(RPS.X()+2,RPS.Y()+5,rpsTravelLog);
     burgerServo.SetDegree(0.0);
-    float tempLeft = LEFTPERCENT;
-    float tempRight = RIGHTPERCENT;
-    motion.travelTo(36.0, 62.1);
-    Sleep(1.0);
-    motion.driveBackwards(0.5);
+    motion.travelTo(RPS.X(), 64.5, rpsTravelLog);
+    
+    
+    motion.turn(10.0,RIGHT);
     burgerServo.SetDegree(110.0);
     Sleep(2.0);
+    rightMotor.Stop();
     burgerServo.SetDegree(0.0);
-    LEFTPERCENT = tempLeft;
-    RIGHTPERCENT = tempRight;
-    motion.turn(90,LEFT);
+    
+
+    motion.turn(90, LEFT);
+
     burgerServo.SetDegree(110);
+    RIGHTPERCENT = RIGHTPERCENT + 10;
+    LEFTPERCENT = LEFTPERCENT - 10;
+    motion.driveBackwards(10.0);
+    motion.travelTo(24.1,49.6,rpsTravelLog);
     
-    lineFollow.follow(3);
-    trayServo.SetDegree(110);
-    
+    motion.travelTo(18.1,55.7,rpsCoordLog);
+    motion.travelTo(RPS.X()-1.0,RPS.Y()+1.0,rpsTravelLog);
+    motion.driveForward(6.0,false);
+    trayServo.SetDegree(100.0);
+    Sleep(1.0);
+    trayServo.SetDegree(0.0);
+    Sleep(0.5);
+    motion.turn(10.0,RIGHT);
+    trayServo.SetDegree(100.0);
+    Sleep(1.0);
+    trayServo.SetDegree(0.0);
+    Sleep(0.5);
+    motion.turn(20.0,LEFT);
+    Sleep(1.0);
+    trayServo.SetDegree(0.0);
+    Sleep(0.5);
+    motion.turn(10.0,LEFT);
+    trayServo.SetDegree(100.0);
+    Sleep(1.0);
+    trayServo.SetDegree(0.0);
+    Sleep(0.5);
+    motion.turn(10.0,LEFT);
+    trayServo.SetDegree(100.0);
+    SD.FClose(rpsTravelLog);
+    SD.FClose(rpsCoordLog);
 
-    /*
-     burgerServo.SetDegree(110);
-     Sleep(2.0);
-
-     trayServo.SetDegree(135.0);
-     while(!LCD.Touch(&x,&y)){}
-
-     while (getLightColor() == 2){}
-     motion.driveForward(14.5,true);
-     //To base of ramp
-
-     Sleep(2.0);
-     motion.turn(45.0,RIGHT);
-
-
-     leftMotor.SetPercent(33.0);
-     rightMotor.SetPercent(-40.0);
-     motion.driveForward(28.0,true);
-     // leftMotor.SetPercent(LEFTPERCENT);
-     // rightMotor.SetPercent(RIGHTPERCENT);
-
-     motion.turn(73.0,RIGHT);
-     motion.driveForward(9.0,true);
-     motion.turn(90.0,LEFT);
-     motion.driveForward(19.0,true);
-     burgerServo.SetDegree(0.0);
-     Sleep(2.0);
-     burgerServo.SetDegree(110.0);
-     */
-    
     return 0;
 }
