@@ -6,6 +6,8 @@
 #include <FEHServo.h>
 #include <FEHBattery.h>
 #include <math.h>
+#include <stdio.h>
+#include <string.h>
 #include <FEHRPS.h>
 #include <FEHSD.h>
 
@@ -62,7 +64,8 @@ FEHServo burgerServo(FEHServo::Servo7);
 class Motion
 {
 public:
-    int countsPerRev, leftCounts, rightCounts;
+    // encoder counts per revolution, left and right counts, times driveForward is called.
+    int countsPerRev, leftCounts, rightCounts, timesCalled;
     // Circumference of wheel = 3.14*D = 3.14*3.25
     float distPerRev = 10.21;
     /**
@@ -75,6 +78,7 @@ public:
         countsPerRev = revCounts;
         leftCounts = 0;
         rightCounts = 0;
+        timesCalled = 0;
     }
     /**
      * @brief writes the left and right digital optosensor values to the screen every 2s for a set amount of time
@@ -98,7 +102,7 @@ public:
     /**
      * @brief implementation of driveForward using shaft encoding.
      *     will dynamically update left and right motor percentages for
-     *      straight driving.
+     *     straight driving. Logs counts vs time data to a file every time function is called.
      *
      * @param distance
      *          - The desired distance
@@ -108,16 +112,34 @@ public:
      */
     void driveForward(float distance, bool dynamic)
     {
+
+        /*
+        Create and open rht###.txt and lft###.txt for writing counts data to be graphed in matlab
+        Can be called at max 999 times without buffer overflow error.
+        */
+        timesCalled++;
+        char fileNum[7], leftFile[11], rightFile[11];
+        sprintf(fileNum, "%d.txt", timesCalled);
+        strcpy(leftFile, "lft");
+        strcpy(rightFile, "rht");
+        strcat(leftFile, fileNum);
+        strcat(rightFile, fileNum);
+        FEHFile *leftData = SD.FOpen(leftFile, "w+");
+        FEHFile *rightData = SD.FOpen(rightFile, "w+");
+
         int requiredCounts = (distance / distPerRev) * countsPerRev;
         leftCounts = 0;
         rightCounts = 0;
+        // Times left and right wheel become stuck, used for infinite loop termination.
         int stuckCounts = 0;
         // Current values of left and right digital optosensors
         int leftCurrent = leftEncoder.Value();
         int rightCurrent = rightEncoder.Value();
-        // Counts per half second of right and left wheel.
+        // Counts per 0.4 seconds of right and left wheel.
         int rightCPQS = 0, leftCPQS = 0;
+        // Interval time used for dynamic robot speed change (DRSC) and data logging interval
         double intervalTime = TimeNow();
+        double dataLogInterval = TimeNow();
         double startTime = TimeNow(), elapsedTime;
         // Start her up
         leftMotor.SetPercent(LEFTPERCENT);
@@ -126,6 +148,7 @@ public:
         while (((leftCounts + rightCounts) / 2) < requiredCounts)
         {
             // If left optosensor switches from a 0 to a 1 or vice versa, update left current value and add 1 to leftCounts
+
             if (leftCurrent != leftEncoder.Value())
             {
                 leftCurrent = leftEncoder.Value();
@@ -138,54 +161,70 @@ public:
                 rightCounts++;
                 rightCPQS++;
             }
-            // Check difference between right and left counts every half second, adjust motor percentages to compensate for difference
-            // To keep speeds bounded, will only increase and decrease the speed of one wheel.
-            if (TimeNow() - intervalTime >= 0.25)
-            {
-                
-                    /*
-                        If right wheel is moving faster than left wheel,
-                        increase speed of left wheel by the ratio of rightCounts/leftCounts.
-                        If left wheel is moving faster than right wheel,
-                        decrease speed of left wheel by ratio leftCounts/rightCounts
-                        if speeds are relatively even, will change little, but if speeds are uneven, will change a lot.
-                    */
 
-                    // TODO: TESTING WITH THIS TO GET PERCENT CHANGES TO WORK WELL
-                    // ALSO TODO: IMPLEMENT RPS TO ALIGN WITH DEST.
-                    if(leftCPQS==0&&rightCPQS==0){
-                        stuckCounts++;
-                    }
-                    if (rightCPQS == 0)
-                    {
-                        rightCPQS = 1;
-                    }
-                    if (leftCPQS == 0)
-                    {
-                        leftCPQS = 1;
-                    }
-                    
-                    if (dynamic){
-            
+            // Log left and right counts data to file every 0.1 seconds.
+            if (TimeNow() - dataLogInterval >= 0.1)
+            {
+                SD.FPrintf(leftData, "%f\t%d", TimeNow() - startTime, leftCounts);
+                SD.FPrintf(rightData, "%f\t%d", TimeNow() - startTime, rightCounts);
+                dataLogInterval = TimeNow();
+            }
+
+            if (TimeNow() - intervalTime >= 0.40)
+            {
+
+                /*
+                    If right wheel is moving faster than left wheel,
+                    increase speed of left wheel by the ratio of rightCounts/leftCounts.
+                    If left wheel is moving faster than right wheel,
+                    decrease speed of left wheel by ratio leftCounts/rightCounts
+                    if speeds are relatively even, will change little, but if speeds are uneven, will change a lot.
+                */
+
+                if (leftCPQS == 0 && rightCPQS == 0)
+                {
+                    stuckCounts++;
+                }
+                if (rightCPQS == 0)
+                {
+                    rightCPQS++;
+                }
+                if (leftCPQS == 0)
+                {
+                    leftCPQS++;
+                }
+
+                if (dynamic)
+                {
+                    /**
+                     * The math behind the dynamic speed change:
+                     * Compensate for count difference by meeting in the middle and adjusting percentages of wheels
+                     * Calculation:
+                     * Needed CPQS change for each wheel = |rightCPQS-leftCPQS|/2
+                     * rightMotor unit CPQS change = rightCPQS/rightpercent
+                     * same for left
+                     * Needed Percentage change for each wheel = Needed CPQS change/unit CPQS change
+                     * As left and right CPQS draw closer together, the percent changes will near zero.
+                     * As left and right CPQS become farther apart, the percent changes will increase.
+                     */
+
                     if (rightCPQS > leftCPQS)
                     {
-                        // no nooby divide by 0 errors.
+
                         // Make Right Smaller, left larger
 
-                        LEFTPERCENT += (rightCPQS / (float)leftCPQS);
-                        // Right polarity reversed, so add to it to decrease it.
-                        RIGHTPERCENT += (rightCPQS / (float)leftCPQS);
+                        LEFTPERCENT += ((rightCPQS - leftCPQS) * LEFTPERCENT) / (2.0 * leftCPQS);
+
+                        RIGHTPERCENT -= ((rightCPQS - leftCPQS) * RIGHTPERCENT) / (2.0 * rightCPQS);
                     }
 
                     else if (leftCPQS > rightCPQS)
                     {
                         // Make right larger, left smaller
 
-                        // Ratio of current left percent to right percent times ratio of right counts to left counts
-                        // Leftpercent will generally decrease by less in this case, which is fine as that makes sense the way
-                        // our motors work.
-                        LEFTPERCENT -= (leftCPQS / (float)rightCPQS);
-                        RIGHTPERCENT -= (leftCPQS / (float)rightCPQS);
+                        LEFTPERCENT -= ((leftCPQS - rightCPQS) * LEFTPERCENT) / (2.0 * leftCPQS);
+
+                        RIGHTPERCENT += ((leftCPQS - rightCPQS) * RIGHTPERCENT) / (2.0 * rightCPQS);
                     }
                 }
                 // Change left percent to new value, set left and right counts per half sec to 0;
@@ -195,17 +234,18 @@ public:
                 leftCPQS = 0;
                 intervalTime = TimeNow();
             }
-            if(stuckCounts>4){
-                requiredCounts=0;
+            // If robot is stuck and remains stuck, terminate.
+            if (stuckCounts > 4)
+            {
+                requiredCounts = 0;
             }
-
         }
 
         leftMotor.Stop();
         rightMotor.Stop();
         elapsedTime = TimeNow() - startTime;
         LCD.Clear();
-
+        
         LCD.WriteLine("NEW LEFT PERCENT: ");
         LCD.WriteLine(LEFTPERCENT);
         LCD.WriteLine("RIGHT PERCENT:");
@@ -213,6 +253,8 @@ public:
         LCD.WriteLine("1)Distance driven 2) time(seconds)");
         LCD.WriteLine(distance);
         LCD.WriteLine(elapsedTime);
+        SD.FClose(leftData);
+        SD.FClose(rightData);
     }
 
     /**
@@ -319,7 +361,7 @@ public:
     {
         float x = 0.0, y = 0.0;
         int count = 1;
-        LCD.WriteLine("Logging 5 points to the SD card. After 10 points, getRPSInfo will exit.");
+        LCD.WriteLine("Logging 10 points to the SD card. After 10 points, getRPSInfo will exit.");
 
         while (count <= 10)
         {
@@ -374,7 +416,7 @@ public:
         xf = destX - xi;
         yf = destY - yi;
         // Think travel dist will work. x,y coords are supposed to be in inches.
-        
+
         SD.FPrintf(rpsTravelLog, "Ran travelTo(%f,%f)\n", destX, destY);
         SD.FPrintf(rpsTravelLog, "I think I am at ( %f, %f ) facing %f deg\n", xi, yi, angleI);
         // Tree to find out which quadrant (xf,yf) is in. atan only returns values (-90,90)
@@ -833,39 +875,65 @@ int main(void)
 
     RPS.InitializeTouchMenu();
 
-    while (!LCD.Touch(&x, &y)){}
-        
+    while (!LCD.Touch(&x, &y))
+    {
+    }
+
     while (LCD.Touch(&x, &y))
     {
     }
-    
-    motion.driveForward(15.0,true);
-    float leftReset=LEFTPERCENT,rightReset=RIGHTPERCENT;
-    
+
+    motion.driveForward(15.0, true);
+    float leftReset = LEFTPERCENT, rightReset = RIGHTPERCENT;
 
     while (getLightColor() != 1)
     {
     }
     // Ramp Base
-    motion.travelTo(18.0, 21.8, rpsTravelLog);
+    motion.travelTo(18.0, 20.3, rpsTravelLog);
+
     // Top of ramp
-    motion.travelTo(17., 48.9, rpsTravelLog);
-    motion.travelTo(32.5, 50.7, rpsTravelLog);
-    
+    motion.travelTo(19.0, 46.9, rpsTravelLog);
+    LEFTPERCENT = leftReset;
+    RIGHTPERCENT = rightReset;
+
+    Sleep(0.5);
+    motion.travelTo(RPS.X(), RPS.Y() + 1, rpsTravelLog);
+    motion.travelTo(19.500, 54.1, rpsTravelLog);
+    motion.travelTo(RPS.X() - 1., RPS.Y() + 1., rpsTravelLog);
+    motion.driveForward(9.0, false);
+    trayServo.SetDegree(90.0);
+    double iceCreamStart = TimeNow();
+    Sleep(0.50);
+    motion.driveBackwards(3.0);
+    trayServo.SetDegree(130.0);
+    while (TimeNow() - iceCreamStart < 8.0)
+    {
+    }
+    motion.driveForward(3.0, false);
+    trayServo.SetDegree(0.0);
+    Sleep(0.5);
+    motion.driveBackwards(9.0);
+    motion.travelTo(18.6, 46.9, rpsTravelLog);
+    motion.travelTo(18.0, 20.3, rpsTravelLog);
+    motion.travelTo(24.56, 2.6, rpsTravelLog);
+
+    /*
+    Exploration 03 code: burger flip
     LEFTPERCENT = leftReset;
     RIGHTPERCENT = rightReset;
     motion.travelTo(34.6,RPS.Y(),rpsTravelLog);
     motion.travelTo(RPS.X()+2,RPS.Y()+5,rpsTravelLog);
     burgerServo.SetDegree(0.0);
     motion.travelTo(RPS.X(), 64.5, rpsTravelLog);
-    
-    
+
+
     motion.turn(10.0,RIGHT);
     burgerServo.SetDegree(110.0);
     Sleep(2.0);
     rightMotor.Stop();
     burgerServo.SetDegree(0.0);
-    
+
 
     motion.turn(90, LEFT);
 
@@ -874,7 +942,7 @@ int main(void)
     LEFTPERCENT = LEFTPERCENT - 10;
     motion.driveBackwards(10.0);
     motion.travelTo(24.1,49.6,rpsTravelLog);
-    
+
     motion.travelTo(18.1,55.7,rpsCoordLog);
     motion.travelTo(RPS.X()-1.0,RPS.Y()+1.0,rpsTravelLog);
     motion.driveForward(6.0,false);
@@ -898,6 +966,7 @@ int main(void)
     Sleep(0.5);
     motion.turn(10.0,LEFT);
     trayServo.SetDegree(100.0);
+    */
     SD.FClose(rpsTravelLog);
     SD.FClose(rpsCoordLog);
 
