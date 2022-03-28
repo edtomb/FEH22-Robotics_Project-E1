@@ -10,25 +10,18 @@
 #include <string.h>
 #include <FEHRPS.h>
 #include <FEHSD.h>
-
+#include <FEHBuzzer.h>
 #include <FEHRandom.h>
 
-/*
-    Global Definitions
-
-    Naming convention: Capitalized, variables with nonimportant values will be named by step number, option number
-    eg: JUKEBOXRED: step 1, option 0, so 10
-
-*/
 // Motor equilibrium percentages
 
-float LEFTPERCENT = 37.1;
-float RIGHTPERCENT = -49.0;
+float LEFTPERCENT = 47.1;
+float RIGHTPERCENT = -59.0;
 
 // parameters for line following functions. Will control how long the function is active for(aka time to button)
 #define Time_JUKEBOXRED 3
 #define Time_JUKEBOXBLUE 3
-#define Time_Tray 3.0
+#define Time_Tray 2.5
 
 #define LINETHRESHHOLD 1.5
 
@@ -66,8 +59,9 @@ class Motion
 public:
     // encoder counts per revolution, left and right counts, times driveForward is called.
     int countsPerRev, leftCounts, rightCounts, timesCalled;
-    // Circumference of wheel = 3.14*D = 3.14*3.25
-    float distPerRev = 10.21;
+    FEHFile *rpsTravelLog;
+    // Circumference of wheel = PI*D
+    float distPerRev = M_PI * 3.25;
     /**
      * @brief Construct a new Motion object
      *
@@ -79,6 +73,7 @@ public:
         leftCounts = 0;
         rightCounts = 0;
         timesCalled = 0;
+        rpsTravelLog = SD.FOpen("rpstrav.txt", "w+");
     }
     /**
      * @brief writes the left and right digital optosensor values to the screen every 2s for a set amount of time
@@ -165,8 +160,8 @@ public:
             // Log left and right counts data to file every 0.1 seconds.
             if (TimeNow() - dataLogInterval >= 0.1)
             {
-                SD.FPrintf(leftData, "%f\t%d", TimeNow() - startTime, leftCounts);
-                SD.FPrintf(rightData, "%f\t%d", TimeNow() - startTime, rightCounts);
+                SD.FPrintf(leftData, "%f\t%d\n", TimeNow() - startTime, leftCounts);
+                SD.FPrintf(rightData, "%f\t%d\n", TimeNow() - startTime, rightCounts);
                 dataLogInterval = TimeNow();
             }
 
@@ -245,7 +240,7 @@ public:
         rightMotor.Stop();
         elapsedTime = TimeNow() - startTime;
         LCD.Clear();
-        
+
         LCD.WriteLine("NEW LEFT PERCENT: ");
         LCD.WriteLine(LEFTPERCENT);
         LCD.WriteLine("RIGHT PERCENT:");
@@ -317,7 +312,7 @@ public:
         leftCounts = 0;
         rightCounts = 0;
         float turnRadius = 3.875;
-        float rads = (angle * 3.1415) / 180;
+        float rads = (angle * M_PI) / 180.;
         // dist = r*Theta
         // revs = dist/circumference
         float revsRequired = (turnRadius * rads) / distPerRev;
@@ -326,17 +321,17 @@ public:
         int rightCurrent = rightEncoder.Value();
         if (direction == LEFT)
         {
-            leftMotor.SetPercent(-LEFTPERCENT);
-            rightMotor.SetPercent(RIGHTPERCENT);
+            leftMotor.SetPercent((-LEFTPERCENT*2.0)/3.0);
+            rightMotor.SetPercent((RIGHTPERCENT*2.0)/3.);
         }
         else
         {
-            leftMotor.SetPercent(LEFTPERCENT);
-            rightMotor.SetPercent(-RIGHTPERCENT);
+            leftMotor.SetPercent((LEFTPERCENT*2.0)/3.);
+            rightMotor.SetPercent((-RIGHTPERCENT*2.0)/3.);
         }
         // While average of counts is less than the required number of counts, keep going
         // No differentail changes on turns.
-        while (((leftCounts + rightCounts) / 2) < requiredCounts)
+        while (((leftCounts + rightCounts) / 2.) <= requiredCounts)
         {
             if (leftCurrent != leftEncoder.Value())
             {
@@ -354,12 +349,13 @@ public:
     }
 
     /**
-     * @brief Gets 5 RPS values on screen touch, writes them to screen and records them on a file.
+     * @brief Gets 10 RPS values on screen touch, writes them to screen and records them on a file.
      *
      */
     void getRPSInfo(FEHFile *fptr)
     {
         float x = 0.0, y = 0.0;
+        float xOffset, yOffset, qrAngle, adjustedX, adjustedY;
         int count = 1;
         LCD.WriteLine("Logging 10 points to the SD card. After 10 points, getRPSInfo will exit.");
 
@@ -372,62 +368,79 @@ public:
             {
             }
             LCD.Clear();
+            float heading = RPS.Heading() + 90.0;
+            if (heading >= 360.)
+            {
+                heading -= 360.;
+            }
+            adjustedX = RPS.X();
+            adjustedY = RPS.Y();
+
             SD.FPrintf(fptr, "Point %d\n", count);
-            SD.FPrintf(fptr, "X: %f\n", RPS.X());
-            SD.FPrintf(fptr, "Y: %f\n", RPS.Y());
-            SD.FPrintf(fptr, "Heading: %f\n", RPS.Heading());
+            SD.FPrintf(fptr, "X: %f\n", adjustedX);
+            SD.FPrintf(fptr, "Y: %f\n", adjustedY);
+            SD.FPrintf(fptr, "Heading: %f\n", heading);
             LCD.WriteLine("Point ");
             LCD.Write(count);
             LCD.WriteLine("X, Y, Heading");
-            LCD.WriteLine(RPS.X());
+            LCD.WriteLine(adjustedX);
             LCD.WriteLine(" ");
-            LCD.WriteLine(RPS.Y());
+            LCD.WriteLine(adjustedY);
             LCD.WriteLine(" ");
-            LCD.WriteLine(RPS.Heading());
+            LCD.WriteLine(heading);
             count++;
             x = 0;
             y = 0;
         }
     }
     /**
-     * @brief The holy grail of functions if you will. Step aside steve jobs. Aligns to and drives to a point on the course.
+     * @brief The holy grail of RPS functions. Step aside Steve Jobs. Aligns to and drives to a point on the course. Then, aligns to a final heading set by the user
      *
-     * @param destX
-     * @param destY
+     * @param destX The RPS X destination coordinate
+     * @param destY The RPS Y destination coordinate
+     * @param driveThere Optional. Defaults to true. Set this to false if you want to orient to a point without driving to it.
      */
-    void travelTo(float destX, float destY, FEHFile *rpsTravelLog)
+    void travelTo(float destX, float destY, bool driveThere = true)
     {
-
-        float xi, yi, xf, yf, angleI, angleF, angleTurn, travelDist;
+        float xi, yi, xf, yf, angleI, angleF, angleTurn, travelDist, xOffset, yOffset, qrAngle;
         bool atDest = false;
         SD.FPrintf(rpsTravelLog, "\n");
-        while (RPS.X() <= -1 || RPS.Y() <= -1)
+        while (RPS.X() == -1. || RPS.Y() == -1.)
         {
+            
         }
+        if (RPS.X() == -2 || RPS.Y() == -2)
+        {
+            LCD.WriteLine("DEADZONE");
+            driveBackwards(6.0);
+        }
+        Sleep(0.5);
+        /*
+        Adjust for misalignment of QR code
+        */
+        angleI = RPS.Heading() + 90.0;
+        if (angleI >= 360.)
+        {
+            angleI -= 360.;
+        }
+
         xi = RPS.X();
         yi = RPS.Y();
-        angleI = RPS.Heading();
-        angleI += 90.0;
-        if (angleI >= 360)
-        {
-            angleI -= 360;
-        }
-        // let (xi,yi) be (0,0). (destX-xi,destY-yi) is distance from that point.
+        // Think travel dist will work. x,y coords are supposed to be in inches.
+        // Update: It does.
         xf = destX - xi;
         yf = destY - yi;
-        // Think travel dist will work. x,y coords are supposed to be in inches.
-
         SD.FPrintf(rpsTravelLog, "Ran travelTo(%f,%f)\n", destX, destY);
-        SD.FPrintf(rpsTravelLog, "I think I am at ( %f, %f ) facing %f deg\n", xi, yi, angleI);
-        // Tree to find out which quadrant (xf,yf) is in. atan only returns values (-90,90)
-        if (xf >= 0)
+        SD.FPrintf(rpsTravelLog, "I think I am at ( %f, %f ) facing %f deg\n", RPS.X(), RPS.Y(), angleI);
+        // Tree to find out which quadrant (xf,yf) is in. atan only returns angles (-pi/2,pi/2)
+        if (xf >= 0.)
         {
             // 1st and 4th quadrants
-            if (xf == 0)
+            if (xf == 0.)
             {
-                // Ok fun part. Xf is zero so no usey arctan. if yf is positive we align to 90 degrees if yf is negative we align to 270 degrees.
+                // Xf is zero so can't use arctan. if yf is positive we align to 90 degrees if yf is negative we align to 270 degrees.
                 // If yf is also zero, then I guess we're at the destination?
-                if (yf > 0)
+                if (yf > 0.)
                 {
                     angleF = 90.0;
                 }
@@ -442,13 +455,13 @@ public:
                     atDest = true;
                 }
             }
-            else if (yf > 0)
+            else if (yf > 0.)
             {
                 // First quadrant. atan functions as desired.
                 angleF = atan(yf / xf);
                 angleF = angleF * (180.0 / M_PI);
             }
-            else if (yf < 0)
+            else if (yf < 0.)
             {
                 // Fourth quadrant. arctan will return negative values. 360-abs(atan(yf/xf) will give what we want
                 angleF = atan(yf / xf);
@@ -464,7 +477,7 @@ public:
         else
         {
             // 2nd and 3rd quadrants
-            if (yf > 0)
+            if (yf > 0.)
             {
                 // 2nd quadrant(-x+y)
                 // 180 - abs(angle) will give desired angle
@@ -472,7 +485,7 @@ public:
                 angleF = angleF * (180.0 / M_PI);
                 angleF = 180.0 - abs(angleF);
             }
-            else if (yf < 0)
+            else if (yf < 0.)
             {
                 // 3rd quadrant(-x,-y)
                 // atan will be positive, 180+angle will give desired angle. adding abs() because I can
@@ -491,7 +504,7 @@ public:
         if (!atDest)
         {
             angleTurn = angleI - angleF;
-            if (angleTurn > 0)
+            if (angleTurn > 0.)
             {
                 SD.FPrintf(rpsTravelLog, "Must travel to the relative coord ( %f, %f ) and turn %f deg right\n", xf, yf, angleTurn);
                 turn(angleTurn, RIGHT);
@@ -501,24 +514,96 @@ public:
                 SD.FPrintf(rpsTravelLog, "Must travel to the relative coord ( %f, %f ) and turn %f deg left\n", xf, yf, abs(angleTurn));
                 turn(abs(angleTurn), LEFT);
             }
+            Sleep(0.5);
+            angleI = RPS.Heading() + 90.0;
+            if (angleI >= 360.0)
+            {
+                angleI -= 360.0;
+            }
+            // Fine tune orientation to align with dest better.
+
+            while (abs(angleI - angleF) > 5.0 && abs(angleI - angleF) < 354.0)
+            {
+                LCD.WriteLine("ALIGNING");
+                
+                if (abs(angleI - angleF) < 180.0)
+                {
+                    if (angleI > angleF)
+                    {
+                        turn(2.0, RIGHT);
+                    }
+                    else
+                    {
+                        turn(2.0, LEFT);
+                    }
+                }
+                //Handles cases where angleI and angleF are on other sides of the 359-0 degree line. 
+                else
+                {
+                    if (angleI > angleF)
+                    {
+                        turn(2.0, LEFT);
+                    }
+                    else
+                    {
+                        turn(2.0, RIGHT);
+                    }
+                }
+                Sleep(0.5);
+                angleI = RPS.Heading() + 90.0;
+                if (angleI >= 360.0)
+                {
+                    angleI -= 360.0;
+                }
+            }
             // we are now aligned with our destination.
-            // drive there.
+            // Get new initial position values to make sure that dist traveled is still right after the turn. 
             xi = RPS.X();
             yi = RPS.Y();
             xf = destX - xi;
             yf = destY - yi;
             travelDist = sqrt((xf * xf) + (yf * yf));
-            driveForward(travelDist, true);
-            Sleep(1.0);
+            if (driveThere)
+            {
+                driveForward(travelDist, true);
+            }
+
+            Sleep(0.5);
             float newAngle = RPS.Heading() + 90.0;
             if (newAngle >= 360.0)
             {
                 newAngle -= 360.0;
             }
             SD.FPrintf(rpsTravelLog, "I have arrived at (%f,%f) facing %f", RPS.X(), RPS.Y(), newAngle);
+            
+        }
+    }
+
+    /**
+     * @brief aligns to a heading on the course
+     *
+     * @param heading The heading in degrees.
+     */
+    void align(float heading)
+    {
+        float turnAngle, currentHeading = RPS.Heading() + 90.0;
+
+        if (currentHeading >= 360)
+        {
+            currentHeading -= 360;
+        }
+        turnAngle = currentHeading - heading;
+        if (turnAngle > 0)
+        {
+            turn(turnAngle, RIGHT);
+        }
+        else
+        {
+            turn(abs(turnAngle), LEFT);
         }
     }
 };
+
 /**
     @brief LineFollowing Class houses the functions used for line following
 
@@ -701,134 +786,18 @@ public:
         leftMotor.Stop();
     }
 };
-/**
- * @brief Drives backward a set distance
- *
- * @param distance
- *      The distance to drive(in inches)
- */
-void driveBackwards(float distance)
-{
-    // distance in inches
-    float velocity = 6.5;
-    // in in/s
-    // velocity will be used to calculate
-    float driveTime = distance / velocity;
-    leftMotor.SetPercent(-LEFTPERCENT);
-    rightMotor.SetPercent(-RIGHTPERCENT);
-    Sleep(driveTime);
-    leftMotor.Stop();
-    rightMotor.Stop();
-}
 
 /**
- * @brief Drives forward a set distance
- *
- * @param distance
- *      The distance to drive(in inches)
+ * NOTE: THE FOLLOWING OUTDATED FUNCTIONS HAVEBEEN MOVED TO LEGACY.CPP
+ * driveBackwards()
+ * driveForward()
+ * turnRight()
+ * turnLeft()
+ * debugForward()
+ * debugLeft()
+ * debugRight()
  */
-void driveForward(float distance)
-{
-    // distance in inches
-    float velocity = 6.0;
-    // in in/s
-    // velocity will be used to calculate
-    float driveTime = distance / velocity;
-    leftMotor.SetPercent(LEFTPERCENT);
-    rightMotor.SetPercent(RIGHTPERCENT);
-    Sleep(driveTime);
-    leftMotor.Stop();
-    rightMotor.Stop();
-}
-/**
- * @brief Turns right over a set angle
- *
- * @param angle
- *      The turn angle(in radian, shadow legends)
- */
-void turnRight(float angle)
-{
-    // Angle in radians.
-    // Robot turns from center of 2 wheels, so turning radius is 4.0in
-    // 2.25  revs in 10s
-    float turnVelocity = 1.7;
-    // in rad/s
 
-    float turningTime = angle / turnVelocity;
-    // Both percents negative: Right back, left forward.
-    rightMotor.SetPercent(-RIGHTPERCENT);
-    leftMotor.SetPercent(LEFTPERCENT);
-    Sleep(turningTime);
-    rightMotor.Stop();
-    leftMotor.Stop();
-}
-/**
- * @brief Turns left over a set angle
- *
- * @param angle
- *      The turn angle(in radian, shadow legends)
- */
-void turnLeft(float angle)
-{
-    // Angle in radians.
-    // Robot turns from center of 2 wheels, so turning radius is 4.0in
-    // S=r*angle, T=S/V
-    // 2.75 revs in 10s
-    float turnVelocity = 1.7;
-    float turningTime = angle / turnVelocity;
-    // Both percents positi7e: Right forward, left back.
-
-    rightMotor.SetPercent(RIGHTPERCENT);
-    leftMotor.SetPercent(-LEFTPERCENT);
-    Sleep(turningTime);
-    rightMotor.Stop();
-    leftMotor.Stop();
-}
-/**
- * @brief Debugging program. Drives forward for 3 seconds to get measurement for forward velocity
- *
- */
-void debugForward()
-{
-
-    LCD.Clear();
-    LCD.WriteLine("The robot will drive forward for 3 seconds.");
-    leftMotor.SetPercent(LEFTPERCENT);
-    rightMotor.SetPercent(RIGHTPERCENT);
-    Sleep(3.0);
-    leftMotor.Stop();
-    rightMotor.Stop();
-}
-/**
- * @brief Debugging program. Turns left for 10 seconds to get left turning velocity.(Revs per sec)
- *
- */
-void debugLeft()
-{
-    // 2 and 1/2 revs in 10 seconds
-    // 1.57 rad/s
-
-    LCD.WriteLine("The robot will turn left for 10 seconds");
-    leftMotor.SetPercent(-LEFTPERCENT);
-    rightMotor.SetPercent(RIGHTPERCENT);
-    Sleep(10.0);
-    leftMotor.Stop();
-    rightMotor.Stop();
-}
-/**
- * @brief Debugging program. Turns right for 10 seconds to get right turning velocity.(Revs per sec)
- *
- */
-void debugRight()
-{
-    LCD.WriteLine("The robot will turn right for 10 seconds");
-    leftMotor.SetPercent(LEFTPERCENT);
-    rightMotor.SetPercent(-RIGHTPERCENT);
-    Sleep(10.0);
-
-    leftMotor.Stop();
-    rightMotor.Stop();
-}
 /**
  * @brief Uses the CDS sensor to get the light color.
  *
@@ -839,18 +808,255 @@ int getLightColor()
     LCD.Clear();
     float cdsValue = cdsSensor.Value();
     LCD.WriteLine(cdsValue);
-    if (cdsValue >= 0.0 && cdsValue <= 0.85)
+    if (cdsValue >= 0.0 && cdsValue <= 1.3)
     {
         LCD.SetBackgroundColor(RED);
+        LCD.WriteLine("RED");
         return 1;
     }
     else
     {
         LCD.SetBackgroundColor(BLUE);
-        return 2;
+        LCD.WriteLine("BLUE");
+        return 0;
     }
 }
 
+/**
+ * @brief With This method, SCRAP-EE becomes the life of the party.
+ *
+ */
+void partyMode()
+{
+    LCD.Clear();
+    for (int i = 0; i < 5; i++)
+    {
+        Buzzer.Tone(FEHBuzzer::B3, 100);
+    }
+    trayServo.SetDegree(10.);
+    burgerServo.SetDegree(90.0);
+    LCD.SetBackgroundColor(RED);
+    LCD.WriteLine(".");
+    Sleep(.1);
+    for (int i = 0; i < 7; i++)
+    {
+        Buzzer.Tone(FEHBuzzer::B3, 100);
+    }
+    LCD.SetBackgroundColor(BLUE);
+    LCD.WriteLine(".");
+    Sleep(.1);
+    for (int i = 0; i < 7; i++)
+    {
+        Buzzer.Tone(FEHBuzzer::E4, 100);
+    }
+    LCD.SetBackgroundColor(GREEN);
+    LCD.WriteLine(".");
+    Sleep(0.1);
+    for (int i = 0; i < 8; i++)
+    {
+        Buzzer.Tone(FEHBuzzer::D4, 100);
+    }
+    LCD.SetBackgroundColor(RED);
+    LCD.WriteLine(".");
+    Sleep(0.1);
+    Buzzer.Tone(FEHBuzzer::A3, 100);
+    Buzzer.Tone(FEHBuzzer::A3, 100);
+    for (int i = 0; i < 5; i++)
+    {
+        Buzzer.Tone(FEHBuzzer::B3, 100);
+    }
+    LCD.SetBackgroundColor(BLUE);
+    LCD.WriteLine(".");
+    Sleep(0.1);
+    for (int i = 0; i < 7; i++)
+    {
+        Buzzer.Tone(FEHBuzzer::B3, 100);
+    }
+    Sleep(0.1);
+    Buzzer.Tone(FEHBuzzer::E4, 100);
+    Buzzer.Tone(FEHBuzzer::E4, 100);
+    for (int i = 0; i < 5; i++)
+    {
+        Buzzer.Tone(FEHBuzzer::B3, 100);
+    }
+    LCD.SetBackgroundColor(RED);
+    LCD.WriteLine(".");
+    Sleep(0.1);
+    for (int i = 0; i < 7; i++)
+    {
+        Buzzer.Tone(FEHBuzzer::B3, 100);
+    }
+    LCD.SetBackgroundColor(BLUE);
+    LCD.WriteLine(".");
+    Sleep(0.1);
+    Buzzer.Tone(FEHBuzzer::E4, 100);
+    Buzzer.Tone(FEHBuzzer::E4, 100);
+    for (int i = 0; i < 5; i++)
+    {
+        Buzzer.Tone(FEHBuzzer::B3, 100);
+    }
+    LCD.SetBackgroundColor(GREEN);
+    LCD.WriteLine(".");
+    Sleep(0.1);
+    for (int i = 0; i < 7; i++)
+    {
+        Buzzer.Tone(FEHBuzzer::B3, 100);
+    }
+    LCD.SetBackgroundColor(RED);
+    LCD.WriteLine(".");
+    Sleep(.1);
+    for (int i = 0; i < 7; i++)
+    {
+        Buzzer.Tone(FEHBuzzer::E4, 100);
+    }
+    LCD.SetBackgroundColor(BLUE);
+    LCD.WriteLine(".");
+    Sleep(0.1);
+    for (int i = 0; i < 7; i++)
+    {
+        Buzzer.Tone(FEHBuzzer::D4, 100);
+    }
+    LCD.SetBackgroundColor(GREEN);
+    LCD.WriteLine(".");
+    Sleep(0.1);
+    Buzzer.Tone(FEHBuzzer::A3, 100);
+    Buzzer.Tone(FEHBuzzer::A3, 100);
+    for (int i = 0; i < 5; i++)
+    {
+        Buzzer.Tone(FEHBuzzer::B3, 100);
+    }
+    LCD.SetBackgroundColor(RED);
+    LCD.WriteLine(".");
+    Sleep(0.1);
+    for (int i = 0; i < 7; i++)
+    {
+        Buzzer.Tone(FEHBuzzer::B3, 100);
+    }
+    LCD.SetBackgroundColor(BLUE);
+    LCD.WriteLine(".");
+    Sleep(0.1);
+    Buzzer.Tone(FEHBuzzer::E4, 100);
+    Buzzer.Tone(FEHBuzzer::E4, 100);
+    for (int i = 0; i < 5; i++)
+    {
+        Buzzer.Tone(FEHBuzzer::B3, 100);
+    }
+    LCD.SetBackgroundColor(GREEN);
+    LCD.WriteLine(".");
+    Sleep(0.1);
+    for (int i = 0; i < 7; i++)
+    {
+        Buzzer.Tone(FEHBuzzer::B3, 100);
+    }
+    LCD.SetBackgroundColor(RED);
+    LCD.WriteLine(".");
+    Sleep(.1);
+    for (int i = 0; i < 7; i++)
+    {
+        Buzzer.Tone(FEHBuzzer::E4, 100);
+    }
+    LCD.SetBackgroundColor(BLUE);
+    LCD.WriteLine(".");
+    Sleep(0.1);
+    for (int i = 0; i < 7; i++)
+    {
+        Buzzer.Tone(FEHBuzzer::D4, 100);
+    }
+    Buzzer.Tone(FEHBuzzer::A3, 100);
+    Buzzer.Tone(FEHBuzzer::A3, 100);
+    for (int i = 0; i < 5; i++)
+    {
+        Buzzer.Tone(FEHBuzzer::B3, 100);
+    }
+    LCD.SetBackgroundColor(GREEN);
+    LCD.WriteLine(".");
+    Sleep(0.1);
+    for (int i = 0; i < 7; i++)
+    {
+        Buzzer.Tone(FEHBuzzer::B3, 100);
+    }
+    LCD.SetBackgroundColor(RED);
+    LCD.WriteLine(".");
+    Sleep(0.1);
+    Buzzer.Tone(FEHBuzzer::E4, 100);
+    Buzzer.Tone(FEHBuzzer::E4, 100);
+    for (int i = 0; i < 5; i++)
+    {
+        Buzzer.Tone(FEHBuzzer::B3, 100);
+    }
+    LCD.SetBackgroundColor(BLUE);
+    LCD.WriteLine(".");
+    Sleep(0.1);
+    for (int i = 0; i < 7; i++)
+    {
+        Buzzer.Tone(FEHBuzzer::B3, 100);
+    }
+    LCD.SetBackgroundColor(GREEN);
+    LCD.WriteLine(".");
+    Sleep(0.1);
+    Buzzer.Tone(FEHBuzzer::E4, 100);
+    Buzzer.Tone(FEHBuzzer::E4, 100);
+    for (int i = 0; i < 5; i++)
+    {
+        Buzzer.Tone(FEHBuzzer::B3, 100);
+    }
+    LCD.SetBackgroundColor(RED);
+    LCD.WriteLine(".");
+    Sleep(0.1);
+    for (int i = 0; i < 7; i++)
+    {
+        Buzzer.Tone(FEHBuzzer::B3, 100);
+    }
+    LCD.SetBackgroundColor(BLUE);
+    LCD.WriteLine(".");
+    Sleep(.1);
+    for (int i = 0; i < 7; i++)
+    {
+        Buzzer.Tone(FEHBuzzer::E4, 100);
+    }
+    LCD.SetBackgroundColor(GREEN);
+    LCD.WriteLine(".");
+    Sleep(0.1);
+    for (int i = 0; i < 7; i++)
+    {
+        Buzzer.Tone(FEHBuzzer::D4, 100);
+    }
+    Buzzer.Tone(FEHBuzzer::A3, 100);
+    Buzzer.Tone(FEHBuzzer::A3, 100);
+    for (int i = 0; i < 5; i++)
+    {
+        Buzzer.Tone(FEHBuzzer::B3, 100);
+    }
+    LCD.SetBackgroundColor(RED);
+    LCD.WriteLine(".");
+    Sleep(0.1);
+    for (int i = 0; i < 7; i++)
+    {
+        Buzzer.Tone(FEHBuzzer::B3, 100);
+    }
+    LCD.SetBackgroundColor(BLUE);
+    LCD.WriteLine(".");
+    Sleep(0.1);
+    Buzzer.Tone(FEHBuzzer::E4, 100);
+    Buzzer.Tone(FEHBuzzer::E4, 100);
+    for (int i = 0; i < 5; i++)
+    {
+        Buzzer.Tone(FEHBuzzer::B3, 100);
+    }
+    LCD.SetBackgroundColor(GREEN);
+    LCD.WriteLine(".");
+    Sleep(0.1);
+    for (int i = 0; i < 7; i++)
+    {
+        Buzzer.Tone(FEHBuzzer::B3, 100);
+    }
+    LCD.SetBackgroundColor(RED);
+    LCD.WriteLine(".");
+    Sleep(0.1);
+    Buzzer.Tone(FEHBuzzer::E4, 100);
+    Buzzer.Tone(FEHBuzzer::E4, 100);
+    Buzzer.Tone(FEHBuzzer::B3);
+}
 int main(void)
 {
 
@@ -860,7 +1066,7 @@ int main(void)
     Motion motion(20);
     FEHFile *rpsCoordLog = SD.FOpen("coords.txt", "a+");
     FEHFile *rpsTravelLog = SD.FOpen("rpsTrav.txt", "a+");
-
+    FEHFile *motorEQ = SD.FOpen("motreq.txt","w+");
     trayServo.SetMin(517);
     trayServo.SetMax(2500);
     burgerServo.SetMin(500);
@@ -872,9 +1078,9 @@ int main(void)
 
     burgerServo.SetDegree(100.0);
     trayServo.SetDegree(0.0);
-
     RPS.InitializeTouchMenu();
-
+    trayServo.SetDegree(45.0);
+    
     while (!LCD.Touch(&x, &y))
     {
     }
@@ -882,26 +1088,84 @@ int main(void)
     while (LCD.Touch(&x, &y))
     {
     }
-
+    
     motion.driveForward(15.0, true);
+    SD.FPrintf(motorEQ,"Left Motor Balanced percent= %f",LEFTPERCENT);
+    
+    SD.FPrintf(motorEQ,"Right Motor Balanced percent= %f",RIGHTPERCENT);
+    SD.FClose(motorEQ);
     float leftReset = LEFTPERCENT, rightReset = RIGHTPERCENT;
 
     while (getLightColor() != 1)
     {
     }
-    // Ramp Base
-    motion.travelTo(18.0, 20.3, rpsTravelLog);
+    motion.travelTo(12.1,14.5);
+    Sleep(0.5);
+    int jukeBoxColor = getLightColor();
+    Sleep(0.5);
+    motion.travelTo(6.8,24.0,false);
+    lineFollow.follow(Time_Tray);
 
+    Sleep(0.5);
+    motion.driveBackwards(.75);
+    motion.turn(10.0,RIGHT);
+    Sleep(0.5);
+    trayServo.SetDegree(95.0);
+    Sleep(1.0);
+    trayServo.SetDegree(0.0);
+    
+    motion.travelTo(RPS.X(),RPS.Y()-1.,false);
+   
+    if(jukeBoxColor==1){
+        motion.travelTo(7.8,16.2,false);
+        motion.travelTo(7.8,16.2);
+        motion.travelTo(RPS.X(),RPS.Y()-1.,false);
+        lineFollow.follow(2.0);
+    }else{
+        motion.travelTo(10.6,16.2,false);
+        motion.travelTo(10.6,16.2);
+        motion.travelTo(RPS.X(),RPS.Y()-1.,false);
+        lineFollow.follow(2.0);
+    }
+    Sleep(1.0);
+    motion.driveBackwards(4.0);
+    /*
+    motion.travelTo(29.3,18.1);
+    motion.travelTo(28.,27.1);
+    motion.travelTo(RPS.X(),RPS.Y()+1.0,false);
+    motion.turn(75.0,RIGHT);
+    burgerServo.SetDegree(35.0);
+    Sleep(1.0);
+    motion.turn(90.0,LEFT);
+    motion.turn(135.,RIGHT);
+    */
+    burgerServo.SetDegree(100.0);
+/*
+ICE CREAM CODE
+    
+    // Ramp Base
+    motion.travelTo(18.9, 20.2);
+    motion.travelTo(RPS.X(), RPS.Y() + 1, false);
     // Top of ramp
-    motion.travelTo(19.0, 46.9, rpsTravelLog);
+    motion.travelTo(17.3, 42.9);
     LEFTPERCENT = leftReset;
     RIGHTPERCENT = rightReset;
 
     Sleep(0.5);
-    motion.travelTo(RPS.X(), RPS.Y() + 1, rpsTravelLog);
-    motion.travelTo(19.500, 54.1, rpsTravelLog);
-    motion.travelTo(RPS.X() - 1., RPS.Y() + 1., rpsTravelLog);
-    motion.driveForward(9.0, false);
+    motion.travelTo(RPS.X() + 1, RPS.Y(), false);
+    motion.travelTo(25.8, 45.7);
+    motion.travelTo(RPS.X() - 1., RPS.Y() + 1., false);
+
+    // At lever
+    motion.travelTo(20.6, 53.5, false);
+
+    motion.travelTo(20.6, 53.5);
+    Sleep(0.5);
+    motion.travelTo(RPS.X() - 1.0, RPS.Y() + 1.);
+
+    LEFTPERCENT = leftReset;
+    RIGHTPERCENT = rightReset;
+    motion.driveForward(6.5, true);
     trayServo.SetDegree(90.0);
     double iceCreamStart = TimeNow();
     Sleep(0.50);
@@ -910,22 +1174,39 @@ int main(void)
     while (TimeNow() - iceCreamStart < 8.0)
     {
     }
-    motion.driveForward(3.0, false);
+    motion.driveForward(2.0, false);
+    trayServo.SetDegree(30.0);
+    Sleep(1.0);
+    trayServo.SetDegree(130.0);
+    motion.driveBackwards(8.0);
     trayServo.SetDegree(0.0);
-    Sleep(0.5);
-    motion.driveBackwards(9.0);
-    motion.travelTo(18.6, 46.9, rpsTravelLog);
-    motion.travelTo(18.0, 20.3, rpsTravelLog);
-    motion.travelTo(24.56, 2.6, rpsTravelLog);
+    motion.travelTo(17.6, 43.5);
 
-    /*
-    Exploration 03 code: burger flip
+    motion.travelTo(18.3, 20.6);
     LEFTPERCENT = leftReset;
     RIGHTPERCENT = rightReset;
-    motion.travelTo(34.6,RPS.Y(),rpsTravelLog);
-    motion.travelTo(RPS.X()+2,RPS.Y()+5,rpsTravelLog);
+
+    // motion.travelTo(RPS.X()+1.0,RPS.Y()-1.0,rpsTravelLog);
+    motion.travelTo(28.7, 8.5);
+    motion.driveForward(5.0, true);
+*/
+    /*
+    Exploration 03 code: burger flip
+    
+    */
+   // Ramp Base
+    motion.travelTo(18.9, 20.2);
+    motion.travelTo(RPS.X(), RPS.Y() + 1, false);
+    // Top of ramp
+    motion.travelTo(17.3, 42.9);
+    LEFTPERCENT = leftReset;
+    RIGHTPERCENT = rightReset;
+    motion.travelTo(34.6,RPS.Y());
+    LEFTPERCENT = leftReset;
+    RIGHTPERCENT = rightReset;
+    motion.travelTo(RPS.X()+2,RPS.Y()+5);
     burgerServo.SetDegree(0.0);
-    motion.travelTo(RPS.X(), 64.5, rpsTravelLog);
+    motion.travelTo(RPS.X(), 64.5);
 
 
     motion.turn(10.0,RIGHT);
@@ -938,13 +1219,15 @@ int main(void)
     motion.turn(90, LEFT);
 
     burgerServo.SetDegree(110);
-    RIGHTPERCENT = RIGHTPERCENT + 10;
-    LEFTPERCENT = LEFTPERCENT - 10;
+    
     motion.driveBackwards(10.0);
-    motion.travelTo(24.1,49.6,rpsTravelLog);
+    LEFTPERCENT = leftReset;
+    RIGHTPERCENT = rightReset;
+    /*
+    motion.travelTo(24.1,49.6);
 
-    motion.travelTo(18.1,55.7,rpsCoordLog);
-    motion.travelTo(RPS.X()-1.0,RPS.Y()+1.0,rpsTravelLog);
+    motion.travelTo(18.1,55.7);
+    motion.travelTo(RPS.X()-1.0,RPS.Y()+1.0);
     motion.driveForward(6.0,false);
     trayServo.SetDegree(100.0);
     Sleep(1.0);
@@ -967,7 +1250,44 @@ int main(void)
     motion.turn(10.0,LEFT);
     trayServo.SetDegree(100.0);
     */
-    SD.FClose(rpsTravelLog);
+   motion.travelTo(25.8, 45.7);
+    motion.travelTo(RPS.X() - 1., RPS.Y() + 1., false);
+
+    // At lever
+    motion.travelTo(20.6, 53.5, false);
+
+    motion.travelTo(20.6, 53.5);
+    Sleep(0.5);
+    motion.travelTo(RPS.X() - 1.0, RPS.Y() + 1.);
+    
+    LEFTPERCENT = leftReset;
+    RIGHTPERCENT = rightReset;
+    lineFollow.follow(3.0);
+    trayServo.SetDegree(90.0);
+    double iceCreamStart = TimeNow();
+    Sleep(0.50);
+    motion.driveBackwards(3.0);
+    trayServo.SetDegree(130.0);
+    while (TimeNow() - iceCreamStart < 8.0)
+    {
+    }
+    motion.driveForward(2.0, false);
+    trayServo.SetDegree(30.0);
+    Sleep(1.0);
+    trayServo.SetDegree(130.0);
+    motion.driveBackwards(8.0);
+    trayServo.SetDegree(0.0);
+    motion.travelTo(17.6, 43.5);
+
+    motion.travelTo(18.3, 20.6);
+    LEFTPERCENT = leftReset;
+    RIGHTPERCENT = rightReset;
+
+    // motion.travelTo(RPS.X()+1.0,RPS.Y()-1.0,rpsTravelLog);
+    motion.travelTo(28.7, 8.5);
+    motion.driveForward(5.0, true);
+    SD.FClose(motion.rpsTravelLog);
+
     SD.FClose(rpsCoordLog);
 
     return 0;
