@@ -6,7 +6,7 @@
  Libraries/FEHRPS.h Drivers/FEHXBee.h Libraries/FEHSD.h Drivers/SDHC.h \
  Drivers/diskio.h Drivers/ff.h Drivers/ffconf.h Drivers/ffconf.h \
  Drivers/diskio.h Libraries/FEHFile.h Libraries/FEHBuzzer.h \
- Libraries/FEHRandom.h
+ Libraries/FEHRandom.h ../rtxOn.h
 Libraries/FEHLCD.h:
 Drivers/spi.h:
 ../fehproteusfirmware/Startup/derivative.h:
@@ -32,3 +32,4 @@ Drivers/diskio.h:
 Libraries/FEHFile.h:
 Libraries/FEHBuzzer.h:
 Libraries/FEHRandom.h:
+../rtxOn.h:
