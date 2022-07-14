@@ -14,6 +14,6 @@ Solidworks 3D rendering of the completed robot
 ![CE9D7823-DB55-4FB7-B10E-9945207BCD86](https://user-images.githubusercontent.com/29485670/178902428-b2cd2758-a3a7-41fa-b7d8-41d184378edf.jpeg)
 
 The robot competing in the final competition, April 9, 2022. Out of 65 teams, our robot placed in the top 16 during the bracket tournament. 
-Feel free to take a look through the code and read the inline documentation if you would like. Also, I am always aspiring to be a better programmer, and I'm open to any comments, questions, or suggestions that you have about this project. 
+Feel free to take a look through the code and read the inline documentation. I am always aspiring to be a better programmer, so I'm open to any comments, questions, or suggestions that you have about this project. 
 This project was done in collaboration with my amazing teamates, Sammy Aidja, Jack Behling, and Kailash Sastry, without whom this would not have been possible.
 Credit is also due to the creators of the FEH Proteus and FEH Proteus firmware, the FEH instructional staff, and my amazing instructor, Paul Clingan, who made the long hours we put into this project more than worth it!
