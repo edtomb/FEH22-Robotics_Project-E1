@@ -12,8 +12,11 @@ The robot itsself makes use of a local positioning system, pinwheel and optosens
 ![3601F288-8E43-4474-96A2-78B81C1428D9](https://user-images.githubusercontent.com/29485670/178902388-f6cbb622-e829-4097-9a75-47c5a5ed69df.png)
 Solidworks 3D rendering of the completed robot
 ![CE9D7823-DB55-4FB7-B10E-9945207BCD86](https://user-images.githubusercontent.com/29485670/178902428-b2cd2758-a3a7-41fa-b7d8-41d184378edf.jpeg)
-
-The robot competing in the final competition, April 9, 2022. Out of 65 teams, our robot placed in the top 16 during the bracket tournament. 
+SCRAP-E Full Assembly
+![SCRAP-E-Full.png](https://raw.githubusercontent.com/edtomb/FEH22-Robotics_Project-E1/master/SCRAP-E-Full-Drawing.png)
+SCRAP-E Full Assembly Exploded View
+![SCRAP-E-Exploded.png](https://raw.githubusercontent.com/edtomb/FEH22-Robotics_Project-E1/master/SCRAP-E-Full-Exploded.png)
+The robot competed in the final competition on April 9, 2022. Out of 65 teams, our robot placed in the top 16 during the bracket tournament. 
 Feel free to take a look through the code and read the inline documentation. I am always aspiring to be a better programmer, so I'm open to any comments, questions, or suggestions that you have about this project. 
 This project was done in collaboration with my amazing teamates, Sammy Aidja, Jack Behling, and Kailash Sastry, without whom this would not have been possible.
 Credit is also due to the creators of the FEH Proteus and FEH Proteus firmware, the FEH instructional staff, and my amazing instructor, Paul Clingan, who made the long hours we put into this project more than worth it!
