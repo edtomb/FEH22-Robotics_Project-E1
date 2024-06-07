@@ -1,22 +1,60 @@
-# FEH22-Robotics_Project-E1
-This code was written as part for a group robotics project as part of Ohio State's Fundamentals of Engineering Honors cirriculum. It is
-written in C++ and designed to run on the FEH Proteus. 
+# Ohio State Fundamentals of Engineering Honors Robotics Project
 
-The goal of the project was to design a robot that would manuver around a diner themed course as pictured below, completing various tasks along the way, such as flipping a burger, dispensing soft serve, returning a tray to the sink, changing the song on a jukebox, and sliding an order ticket. 
+This code was developed as part of a group robotics project within Ohio State's Fundamentals of Engineering Honors curriculum. It is written in C++ and designed to run on the FEH Proteus.
 
-![353188EC-BFF1-400D-9ABD-D0BCC081F463](https://user-images.githubusercontent.com/29485670/178905335-8690a4d2-901f-4105-a5b7-61925ce0dc33.jpeg)
+## Project Overview
 
+The objective of this project was to design a robot capable of navigating a diner-themed course, completing various tasks such as:
 
-The robot itsself makes use of a local positioning system, pinwheel and optosensor shaft encoders, a line following circuit, and multiple servos. It was assembled entirely from factory parts without the use of any kits. The total production cost of the robot was $117, $43 under the maximum budget of $160.
+- Flipping a burger
+- Dispensing soft serve
+- Returning a tray to the sink
+- Changing the song on a jukebox
+- Sliding an order ticket
 
-![3601F288-8E43-4474-96A2-78B81C1428D9](https://user-images.githubusercontent.com/29485670/178902388-f6cbb622-e829-4097-9a75-47c5a5ed69df.png)
-Solidworks 3D rendering of the completed robot
-![CE9D7823-DB55-4FB7-B10E-9945207BCD86](https://user-images.githubusercontent.com/29485670/178902428-b2cd2758-a3a7-41fa-b7d8-41d184378edf.jpeg)
-SCRAP-E Full Assembly
-![SCRAP-E-Full.png](https://raw.githubusercontent.com/edtomb/FEH22-Robotics_Project-E1/master/SCRAP-E-Full-Drawing.png)
-SCRAP-E Full Assembly Exploded View
-![SCRAP-E-Exploded.png](https://raw.githubusercontent.com/edtomb/FEH22-Robotics_Project-E1/master/SCRAP-E-Full-Exploded.png)
-The robot competed in the final competition on April 9, 2022. Out of 65 teams, our robot placed in the top 16 during the bracket tournament. 
-Feel free to take a look through the code and read the inline documentation. I am always aspiring to be a better programmer, so I'm open to any comments, questions, or suggestions that you have about this project. 
-This project was done in collaboration with my amazing teamates, Sammy Aidja, Jack Behling, and Kailash Sastry, without whom this would not have been possible.
-Credit is also due to the creators of the FEH Proteus and FEH Proteus firmware, the FEH instructional staff, and my amazing instructor, Paul Clingan, who made the long hours we put into this project more than worth it!
+![Course Image](https://user-images.githubusercontent.com/29485670/178905335-8690a4d2-901f-4105-a5b7-61925ce0dc33.jpeg)
+
+## Robot Design
+
+The robot incorporates several key features:
+
+- Local positioning system
+- Pinwheel and optosensor shaft encoders
+- Line-following circuit
+- Multiple servos
+
+The robot was assembled entirely from factory parts without the use of any kits. The total production cost was $117, which is $43 under the maximum budget of $160.
+
+### Renderings and Assemblies
+
+![Solidworks 3D Rendering](https://user-images.githubusercontent.com/29485670/178902388-f6cbb622-e829-4097-9a75-47c5a5ed69df.png)
+*SolidWorks 3D rendering of the completed robot*
+
+![SCRAP-E Full Assembly](https://user-images.githubusercontent.com/29485670/178902428-b2cd2758-a3a7-41fa-b7d8-41d184378edf.jpeg)
+*SCRAP-E Full Assembly*
+
+![SCRAP-E Full Assembly Exploded View](https://raw.githubusercontent.com/edtomb/FEH22-Robotics_Project-E1/master/SCRAP-E-Full-Drawing.png)
+*SCRAP-E Full Assembly Exploded View*
+
+![SCRAP-E Exploded View](https://raw.githubusercontent.com/edtomb/FEH22-Robotics_Project-E1/master/SCRAP-E-Full-Exploded.png)
+*SCRAP-E Exploded View*
+
+## Competition Results
+
+The robot competed in the final competition on April 9, 2022. Out of 65 teams, our robot placed in the top 16 during the bracket tournament.
+
+## Code and Documentation
+
+Feel free to explore the code and review the inline documentation. I am always aspiring to become a better programmer, so I welcome any comments, questions, or suggestions you have about this project.
+
+## Acknowledgments
+
+This project was completed in collaboration with my amazing teammates:
+
+- Sammy Aidja
+- Jack Behling
+- Kailash Sastry
+
+Without their efforts, this project would not have been possible.
+
+Special thanks to the creators of the FEH Proteus and FEH Proteus firmware, the FEH instructional staff, and our instructor, Paul Clingan, whose support made the long hours we put into this project worthwhile.
